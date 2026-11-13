@@ -1,6 +1,0 @@
-venv/
-__pycache__/
-.git/
-.pytest_cache/
-*.pyc
-audit_logs/

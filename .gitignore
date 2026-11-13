@@ -1,24 +1,11 @@
-# Python
 __pycache__/
-*.py[cod]
-*.pyo
-
-# Virtual environment
-venv/
-
-# Logs
-logs/
-*.log
-
-# Audit logs
-audit_logs/
-
-# Environment
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+eval_results/
+demo/
+*.xlsx
 .env
-
-# macOS
+.venv/
+venv/
 .DS_Store
-
-# IDE
-.vscode/
-.idea/
