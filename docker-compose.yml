@@ -1,39 +1,12 @@
-version: "3.9"
-
 services:
-
   api:
-
-    build:
-
-      context: .
-
-      dockerfile: Dockerfile
-
-    container_name: wealthpilot-api
-
-    ports:
-
-      - "8000:8000"
-
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      BALANCEBOOK_API_KEYS: ${BALANCEBOOK_API_KEYS:-change-me}
     restart: unless-stopped
-
   dashboard:
-
-    build:
-
-      context: .
-
-      dockerfile: Dockerfile.dashboard
-
-    container_name: wealthpilot-dashboard
-
-    depends_on:
-
-      - api
-
-    ports:
-
-      - "8501:8501"
-
+    build: .
+    command: ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    ports: ["8501:8501"]
     restart: unless-stopped

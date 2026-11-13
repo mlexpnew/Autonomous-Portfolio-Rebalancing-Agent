@@ -1,55 +1,36 @@
-name: WealthPilot CI
-
+name: CI
 on:
-
   push:
-
-    branches:
-      - master
-      - main
-
+    branches: [main]
   pull_request:
 
-    branches:
-      - master
-      - main
-
 jobs:
-
   test:
-
     runs-on: ubuntu-latest
-
     steps:
-
-      - name: Checkout Repository
-
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-
-        uses: actions/setup-python@v5
-
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-
           python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check . && ruff format --check .
+      - run: pytest -q
+      - name: Backtest gate (less tax than band rebalancing, same risk control, more after-tax wealth)
+        run: python -m balancebook.backtest --gate
+      - run: cat eval_results/report.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install Dependencies
-
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t balancebook .
+      - name: Smoke test
         run: |
-
-          python -m pip install --upgrade pip
-
-          pip install -r requirements.txt
-
-      - name: Check FastAPI Imports
-
-        run: |
-
-          python -c "import app"
-
-      - name: Run Unit Tests
-
-        run: |
-
-          pytest tests/
+          docker run -d --name bb -p 8000:8000 -e BALANCEBOOK_API_KEYS=k balancebook
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
+          curl -sf -H 'X-API-Key: k' -H 'Content-Type: application/json' localhost:8000/v1/plan -d '{
+            "client_id":"A","risk":"moderate","target":{"equity":0.55,"debt":0.35,"gold":0.10},
+            "prices":{"equity":100,"debt":100,"gold":100},"as_of":"2026-01-10",
+            "lots":[{"asset":"equity","units":700,"cost":60,"bought":"2021-02-01"},
+                    {"asset":"debt","units":250,"cost":90,"bought":"2022-05-01"},
+                    {"asset":"gold","units":50,"cost":80,"bought":"2022-05-01"}]}' | grep -q '"rebalance"'

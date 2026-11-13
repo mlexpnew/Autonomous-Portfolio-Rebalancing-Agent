@@ -1,617 +1,91 @@
-import sys
-from pathlib import Path
+"""BalanceBook dashboard.  streamlit run app.py"""
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+from __future__ import annotations
 
-from fastapi import FastAPI, Query
-from analytics.decision_analytics import DecisionAnalytics
-from agents.orchestrator import Orchestrator
-from config.settings import settings
-from core.state import PortfolioState
-from api.portfolio_api import router as portfolio_router
-from analytics.portfolio_analytics import PortfolioAnalytics
-import sys
-import json
-from pathlib import Path
-from reports.report_generator import ReportGenerator
-from fastapi.responses import FileResponse
-from chat.portfolio_chat import PortfolioChat
-from analytics.portfolio_compare import PortfolioComparison
-from analytics.explainability import ExplainabilityEngine
-from recommendation.recommendation_engine import RecommendationEngine
-from simulation.monte_carlo import MonteCarloSimulator
-from reporting.report_generator import PortfolioReport
-from alerts.alert_engine import AlertEngine
+from datetime import date
 
-from services.email_service import EmailService
-from config.email_settings import (
-    SENDER_EMAIL,
-    APP_PASSWORD,
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+from balancebook.backtest import clients, market, opening_lots
+from balancebook.book import Book, load_clients, load_holdings
+
+st.set_page_config(page_title="BalanceBook", page_icon="⚖️", layout="wide")
+st.title("BalanceBook")
+st.caption(
+    "Tax-aware rebalancing for Indian advisers: new money first, trades only when a client "
+    "leaves their band, cheapest lots first, March gain harvesting. Nothing executes without approval."
 )
 
-
-analytics = PortfolioAnalytics()
-
-report_generator = ReportGenerator()
-
-chatbot = PortfolioChat()
-
-comparison_engine = PortfolioComparison()
-
-xai = ExplainabilityEngine()
-
-recommendation_engine = RecommendationEngine()
-
-simulator = MonteCarloSimulator()
-
-report_generator = PortfolioReport()
-
-alert_engine = AlertEngine()
-
-app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.VERSION,
-)
-
-app.include_router(portfolio_router)
-from utils.logger import logger
-
-from starlette.routing import Route
-
-logger.info("REGISTERED ROUTES")
-
-for route in app.routes:
-    if isinstance(route, Route):
-        logger.info(route.path)
-
-orchestrator = Orchestrator()
-analytics = DecisionAnalytics()
-
-
-email_service = EmailService(
-    SENDER_EMAIL,
-    APP_PASSWORD,
-)
-
-
-@app.get("/override")
-def override(
-    action: str = Query(
-        default="APPROVE"
-    )
-):
-
-    portfolio = PortfolioState(
-
-        portfolio_id="WP-1001",
-
-        client_name="Rahul Sharma",
-
-        risk_category="Moderate",
-
-        current_allocation={
-            "Equity":0.68,
-            "Debt":0.22,
-            "Gold":0.10
-        },
-
-        target_allocation={
-            "Equity":0.60,
-            "Debt":0.30,
-            "Gold":0.10
-        }
-    )
-
-    result = orchestrator.run(portfolio)
-
-    result = orchestrator.hitl.execute(
-        result,
-        action
-    )
-
-    return result.model_dump()
-
-
-   
-
-
-@app.get("/audit")
-def audit_history():
-
-    file = Path("audit_logs/audit_history.json")
-
-    if not file.exists():
-
-        return {
-            "count": 0,
-            "history": [],
-        }
-
-    try:
-
-        with open(file, "r") as f:
-
-            history = json.load(f)
-
-    except Exception:
-
-        history = []
-
-    history.reverse()
-
-    return {
-        "count": len(history),
-        "history": history,
-    }
-    
-
-@app.get("/analytics")
-def analytics_summary():
-
-    return analytics.summary()
-
-
-
-
-from backtesting.backtest_engine import BacktestEngine
-
-engine = BacktestEngine()
-@app.get("/backtest")
-def backtest():
-
-    portfolio = PortfolioState(
-
-        portfolio_id="WP-1001",
-
-        client_name="Rahul Sharma",
-
-        risk_category="Moderate",
-
-        current_allocation={
-            "Equity": 0.68,
-            "Debt": 0.22,
-            "Gold": 0.10,
-        },
-
-        target_allocation={
-            "Equity": 0.60,
-            "Debt": 0.30,
-            "Gold": 0.10,
-        },
-    )
-
-    return engine.compare(portfolio)
-
-
-@app.get("/")
-def home():
-
-    return {
-        "application": settings.APP_NAME,
-        "status": "running",
-    }
-
-
-@app.get("/health")
-def health():
-
-    return {"status": "healthy"}
-
-
-@app.get("/test")
-def test_pipeline():
-
-    portfolio = PortfolioState(
-
-        portfolio_id="WP-1001",
-
-        client_name="Rahul Sharma",
-
-        risk_category="Moderate",
-
-        current_allocation={
-            "Equity": 0.68,
-            "Debt": 0.22,
-            "Gold": 0.10,
-        },
-
-        target_allocation={
-            "Equity": 0.60,
-            "Debt": 0.30,
-            "Gold": 0.10,
-        },
-    )
-    
-    result = orchestrator.run(portfolio)
-
-    return result.model_dump()
-
-
-@app.get("/run/{portfolio_id}")
-def run_portfolio(portfolio_id: str):
-
-    with open("data/clients.json") as f:
-        clients = json.load(f)
-
-    for client in clients:
-
-        if client["portfolio_id"] == portfolio_id:
-
-            portfolio = PortfolioState(**client)
-
-            result = orchestrator.run(portfolio)
-
-            return result.model_dump()
-
-    return {
-        "error": "Portfolio not found"
-    }
-    
-    
-@app.get("/report/{portfolio_id}")
-def report(portfolio_id: str):
-
-    with open("data/clients.json") as f:
-
-        clients = json.load(f)
-
-    for client in clients:
-
-        if client["portfolio_id"] == portfolio_id:
-
-            portfolio = PortfolioState(**client)
-
-            result = orchestrator.run(portfolio)
-
-            pdf = report_generator.generate(
-                result.model_dump()
-            )
-
-            return FileResponse(
-                pdf,
-                media_type="application/pdf",
-                filename=Path(pdf).name,
-            )
-
-    return {
-        "error": "Portfolio not found"
-    }
-@app.post("/email/{portfolio_id}")
-def send_email(
-
-    portfolio_id: str,
-
-    recipient: str,
-
-):
-
-    with open("data/clients.json") as f:
-
-        clients = json.load(f)
-
-    for client in clients:
-
-        if client["portfolio_id"] == portfolio_id:
-
-            portfolio = PortfolioState(**client)
-
-            result = orchestrator.run(portfolio)
-
-            pdf = report_generator.generate(
-                result.model_dump()
-            )
-
-            return email_service.send_report(
-
-                recipient,
-
-                pdf,
-
-                client["client_name"],
-
-            )
-
-    return {
-
-        "error": "Portfolio not found"
-
-    }
-    
-    
-@app.get("/chat/{portfolio_id}")
-def chat(
-
-    portfolio_id: str,
-
-    question: str,
-
-):
-
-    with open("data/clients.json") as f:
-
-        clients = json.load(f)
-
-    for client in clients:
-
-        if client["portfolio_id"] == portfolio_id:
-
-            portfolio = PortfolioState(
-
-                portfolio_id=client["portfolio_id"],
-                client_name=client["client_name"],
-                risk_category=client["risk_category"],
-                portfolio_value=client["portfolio_value"],
-                current_allocation=client["current_allocation"],
-                target_allocation=client["target_allocation"],
-            )
-
-            result = orchestrator.run(portfolio)
-
-            return {
-
-                "question": question,
-
-                "answer": chatbot.reply(
-
-                    question,
-
-                    result.model_dump(),
-
-                ),
-
+cu = st.sidebar.file_uploader("Clients (CSV)", type="csv")
+ho = st.sidebar.file_uploader("Holdings (CSV)", type="csv")
+st.sidebar.write("Current NAVs")
+pe = st.sidebar.number_input("Equity", value=100.0)
+pdbt = st.sidebar.number_input("Debt", value=100.0)
+pg = st.sidebar.number_input("Gold", value=100.0)
+today = st.sidebar.date_input("Plan date", date(2026, 3, 10))
+
+
+@st.cache_data
+def sample():
+    m = market(11)
+    cl, hold = [], {}
+    for k, (c, v, dr) in enumerate(clients(21, n=40)):
+        cl.append(c)
+        hold[c.client_id] = opening_lots(c, v, dr, m, np.random.default_rng(k))
+    return cl, hold
+
+
+if cu and ho:
+    cl, hold = load_clients(cu), load_holdings(ho)
+else:
+    st.info("No files uploaded: showing a sample book of 40 clients.")
+    cl, hold = sample()
+book = Book(cl, hold, {"equity": pe, "debt": pdbt, "gold": pg})
+if "decisions" not in st.session_state:
+    st.session_state.decisions = []
+plans = book.plans(today)
+
+k = st.columns(4)
+counts = pd.Series([p.status for p in plans]).value_counts()
+k[0].metric("Clients", len(plans))
+k[1].metric("Need rebalancing", int(counts.get("rebalance", 0)))
+k[2].metric("Gain harvesting", int(counts.get("harvest", 0)))
+k[3].metric("Blocked (suitability)", int(counts.get("blocked", 0)))
+
+st.dataframe(
+    pd.DataFrame(
+        [
+            {
+                "client": p.client_id,
+                "status": p.status,
+                "equity now": p.weights_before.get("equity"),
+                "equity after": p.weights_after.get("equity"),
+                "est. tax": round(p.est_tax),
+                "exit loads": round(p.exit_loads),
+                "why": "; ".join(p.reasons),
             }
+            for p in plans
+        ]
+    ),
+    hide_index=True,
+    use_container_width=True,
+)
 
-    return {
-
-        "error": "Portfolio not found"
-
-    }
-    
-    
-@app.get("/compare")
-def compare(
-
-    portfolio1: str,
-
-    portfolio2: str,
-
-):
-
-    with open("data/clients.json") as f:
-
-        clients = json.load(f)
-
-    result1 = None
-
-    result2 = None
-
-    for client in clients:
-
-        if client["portfolio_id"] == portfolio1:
-
-            state = PortfolioState(
-
-                portfolio_id=client["portfolio_id"],
-
-                client_name=client["client_name"],
-
-                risk_category=client["risk_category"],
-
-                portfolio_value=client["portfolio_value"],
-
-                current_allocation=client["current_allocation"],
-
-                target_allocation=client["target_allocation"],
-
-            )
-
-            result1 = orchestrator.run(
-                state
-            ).model_dump()
-
-        if client["portfolio_id"] == portfolio2:
-
-            state = PortfolioState(
-
-                portfolio_id=client["portfolio_id"],
-
-                client_name=client["client_name"],
-
-                risk_category=client["risk_category"],
-
-                portfolio_value=client["portfolio_value"],
-
-                current_allocation=client["current_allocation"],
-
-                target_allocation=client["target_allocation"],
-
-            )
-
-            result2 = orchestrator.run(
-                state
-            ).model_dump()
-
-    if result1 is None or result2 is None:
-
-        return {
-
-            "error":
-
-            "Portfolio not found"
-
-        }
-
-    return comparison_engine.compare(
-
-        result1,
-
-        result2,
-
+pick = st.selectbox("Review a plan", [p.client_id for p in plans if p.status != "hold"] or [plans[0].client_id])
+p = next(x for x in plans if x.client_id == pick)
+st.write(f"**{p.status}**: " + "; ".join(p.reasons))
+if p.trades:
+    st.dataframe(
+        pd.DataFrame([t.as_dict() for t in p.trades]).round(2), hide_index=True, use_container_width=True
     )
-
-@app.get("/explain/{portfolio_id}")
-def explain(portfolio_id: str):
-
-    with open("data/clients.json") as f:
-
-        clients = json.load(f)
-
-    for client in clients:
-
-        if client["portfolio_id"] == portfolio_id:
-
-            portfolio = PortfolioState(
-
-                portfolio_id=client["portfolio_id"],
-
-                client_name=client["client_name"],
-
-                risk_category=client["risk_category"],
-
-                portfolio_value=client["portfolio_value"],
-
-                current_allocation=client["current_allocation"],
-
-                target_allocation=client["target_allocation"],
-
-            )
-
-            result = orchestrator.run(portfolio)
-
-            return xai.generate(result)
-
-    return {
-
-        "error": "Portfolio not found"
-
-    }
-
-
-
-@app.get("/recommend/{portfolio_id}")
-def recommend(portfolio_id: str):
-
-    with open("data/clients.json") as f:
-
-        clients = json.load(f)
-
-    for client in clients:
-
-        if client["portfolio_id"] == portfolio_id:
-
-            portfolio = PortfolioState(**client)
-
-            result = orchestrator.run(portfolio)
-
-            return recommendation_engine.generate(result)
-
-    return {"error": "Portfolio not found"}
-
-
-@app.get("/simulation/{portfolio_id}")
-def simulation(portfolio_id: str):
-
-    with open("data/clients.json") as f:
-
-        clients = json.load(f)
-
-    for client in clients:
-
-        if client["portfolio_id"] == portfolio_id:
-
-            return simulator.simulate(
-
-                client["portfolio_value"]
-
-            )
-
-    return {
-
-        "error": "Portfolio not found"
-
-    }
-    
-    
-from fastapi.responses import FileResponse
-
-
-@app.get("/report/{portfolio_id}")
-def report(portfolio_id: str):
-
-    with open("data/clients.json") as f:
-
-        clients = json.load(f)
-
-    for client in clients:
-
-        if client["portfolio_id"] == portfolio_id:
-
-            portfolio = PortfolioState(
-
-                portfolio_id=client["portfolio_id"],
-
-                client_name=client["client_name"],
-
-                risk_category=client["risk_category"],
-
-                portfolio_value=client["portfolio_value"],
-
-                current_allocation=client["current_allocation"],
-
-                target_allocation=client["target_allocation"],
-
-            )
-
-            result = orchestrator.run(portfolio)
-
-            file = report_generator.generate(result)
-
-            return FileResponse(
-
-                file,
-
-                media_type="application/pdf",
-
-                filename=f"{portfolio_id}.pdf",
-
-            )
-
-    return {
-
-        "error": "Portfolio not found"
-
-    }
-    
-    
-@app.get("/alerts/{portfolio_id}")
-def alerts(portfolio_id: str):
-
-    with open("data/clients.json") as f:
-        clients = json.load(f)
-
-    for client in clients:
-
-        if client["portfolio_id"] == portfolio_id:
-
-            portfolio = PortfolioState(
-
-                portfolio_id=client["portfolio_id"],
-                client_name=client["client_name"],
-                risk_category=client["risk_category"],
-                portfolio_value=client["portfolio_value"],
-                current_allocation=client["current_allocation"],
-                target_allocation=client["target_allocation"],
-            )
-
-            result = orchestrator.run(portfolio)
-
-            return alert_engine.generate(result)
-
-    return {
-        "error": "Portfolio not found"
-    }
-    
-@app.get("/agent-metrics")
-def agent_metrics():
-
-    return orchestrator.metrics.summary()
+c1, c2, c3 = st.columns([2, 1, 1])
+adviser = c1.text_input("Adviser", "")
+if c2.button("Approve", disabled=not adviser):
+    st.session_state.decisions.append(book.decide(pick, str(today), "approved", adviser).__dict__)
+if c3.button("Reject", disabled=not adviser):
+    st.session_state.decisions.append(book.decide(pick, str(today), "rejected", adviser).__dict__)
+if st.session_state.decisions:
+    st.subheader("Approval log")
+    st.dataframe(pd.DataFrame(st.session_state.decisions), hide_index=True)
